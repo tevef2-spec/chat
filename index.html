@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sowar Chat | الدردشة العامة</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #075e54;
+            --secondary-color: #128c7e;
+            --bg-color: #e5ddd5;
+            --my-msg: #dcf8c6;
+            --other-msg: #ffffff;
+        }
+        body { font-family: 'Cairo', sans-serif; margin: 0; background-color: #f0f2f5; overflow: hidden; }
+        
+        /* واجهة تسجيل الدخول */
+        #login-screen { position: fixed; inset: 0; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
+        .login-box { width: 85%; max-width: 350px; text-align: center; }
+        .login-box img { width: 80px; margin-bottom: 20px; }
+        input[type="text"] { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; margin-bottom: 15px; outline: none; font-family: inherit; }
+        .btn-login { width: 100%; padding: 12px; background: var(--primary-color); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; }
+
+        /* واجهة الدردشة */
+        #chat-screen { display: none; flex-direction: column; height: 100vh; }
+        .header { background: var(--primary-color); color: white; padding: 15px; display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .header .status-dot { width: 10px; height: 10px; background: #25d366; border-radius: 50%; }
+        
+        #messages-container { flex: 1; overflow-y: auto; padding: 15px; background: var(--bg-color); display: flex; flex-direction: column; gap: 10px; }
+        
+        .message { max-width: 75%; padding: 8px 12px; border-radius: 10px; position: relative; font-size: 15px; line-height: 1.4; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .message .user { font-weight: bold; font-size: 12px; color: var(--secondary-color); display: block; margin-bottom: 3px; }
+        .message .time { font-size: 10px; color: #999; display: block; text-align: left; margin-top: 5px; }
+        
+        .received { align-self: flex-start; background: var(--other-msg); border-top-right-radius: 0; }
+        .sent { align-self: flex-end; background: var(--my-msg); border-top-left-radius: 0; }
+
+        .input-area { background: #f0f0f0; padding: 10px; display: flex; align-items: center; gap: 8px; }
+        #msg-input { flex: 1; padding: 12px; border: none; border-radius: 25px; outline: none; font-family: inherit; }
+        .btn-send { background: var(--secondary-color); color: white; border: none; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <div class="login-box">
+            <h2 style="color: var(--primary-color);">Sowar Chat</h2>
+            <p>أهلاً بك! يرجى اختيار اسم مستعار للدردشة</p>
+            <input type="text" id="username-input" placeholder="اكتب اسمك هنا...">
+            <button class="btn-login" onclick="handleLogin()">ابدأ الآن</button>
+        </div>
+    </div>
+
+    <div id="chat-screen">
+        <div class="header">
+            <div class="status-dot"></div>
+            <div>
+                <div style="font-weight: bold;">الدردشة العامة</div>
+                <div style="font-size: 11px; opacity: 0.8;">متصل الآن</div>
+            </div>
+        </div>
+        
+        <div id="messages-container"></div>
+
+        <div class="input-area">
+            <input type="text" id="msg-input" placeholder="اكتب رسالة...">
+            <button class="btn-send" id="send-btn">➤</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
+        import { getDatabase, ref, push, onChildAdded, onValue } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-database.js";
+
+        // بيانات الربط الخاصة بك
+        const firebaseConfig = {
+          apiKey: "AIzaSyCM6MIW3xGrKVR3LIaQoVfBZjAXstm1ZCw",
+          authDomain: "sowarchat.firebaseapp.com",
+          databaseURL: "https://sowarchat-default-rtdb.firebaseio.com",
+          projectId: "sowarchat",
+          storageBucket: "sowarchat.firebasestorage.app",
+          messagingSenderId: "432871645358",
+          appId: "1:432871645358:web:59ca9b1e9f542f27d34d3f"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        let currentUser = localStorage.getItem('sowar_user');
+
+        // التحقق من الدخول السابق
+        if(currentUser) {
+            showChat();
+        }
+
+        window.handleLogin = () => {
+            const name = document.getElementById('username-input').value.trim();
+            if(name) {
+                localStorage.setItem('sowar_user', name);
+                currentUser = name;
+                showChat();
+            } else {
+                alert("يرجى إدخال اسمك!");
+            }
+        };
+
+        function showChat() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('chat-screen').style.display = 'flex';
+            startChatLogic();
+        }
+
+        function startChatLogic() {
+            const messagesRef = ref(db, 'public_chat');
+            const msgContainer = document.getElementById('messages-container');
+
+            // إرسال رسالة
+            document.getElementById('send-btn').onclick = () => {
+                const text = document.getElementById('msg-input').value.trim();
+                if(text) {
+                    push(messagesRef, {
+                        name: currentUser,
+                        text: text,
+                        time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                        timestamp: Date.now()
+                    });
+                    document.getElementById('msg-input').value = "";
+                }
+            };
+
+            // استقبال الرسائل
+            onChildAdded(messagesRef, (data) => {
+                const msg = data.val();
+                const isMe = msg.name === currentUser;
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${isMe ? 'sent' : 'received'}`;
+                msgDiv.innerHTML = `
+                    <span class="user">${msg.name}</span>
+                    ${msg.text}
+                    <span class="time">${msg.time}</span>
+                `;
+                msgContainer.appendChild(msgDiv);
+                msgContainer.scrollTop = msgContainer.scrollHeight;
+            });
+        }
+    </script>
+</body>
+</html>
